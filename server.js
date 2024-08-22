@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const Moralis = require('moralis').default;
 require('dotenv').config();
+const { Buffer } = require('buffer');
 
 const app = express();
 app.use(express.json());
@@ -26,6 +27,16 @@ Moralis.start({
   apiKey: process.env.MORALIS_API_KEY,
 });
 
+// Function to extract IPFS hash from URL
+function extractIPFSHash(url) {
+  const match = url.match(/ipfs\/([A-Za-z0-9]+)/);
+  if (match && match[1]) {
+    return match[1];
+  } else {
+    throw new Error('IPFS hash not found in the URL.');
+  }
+}
+
 // API endpoint to store text data on IPFS and save hash in MongoDB
 app.post('/store-text', async (req, res) => {
   try {
@@ -35,22 +46,25 @@ app.post('/store-text', async (req, res) => {
       return res.status(400).json({ error: 'Text and filename are required.' });
     }
 
-    // Create the file array
+    // Convert text to Base64 and create file object
+    const base64Text = Buffer.from(text).toString('base64');
     const uploadArray = [
       {
         path: `${filename}.txt`,
-        content: Buffer.from(text).toString('base64'), // Convert text to Base64
+        content: base64Text, // Base64 encoded content
+        mimeType: 'text/plain', // MIME type for text files
       },
     ];
 
     // Upload to IPFS via Moralis
     const response = await Moralis.EvmApi.ipfs.uploadFolder({ abi: uploadArray });
 
-    if (!response || response.result.length === 0) {
+    if (!response || !response.result || response.result.length === 0) {
       throw new Error('Failed to get CID from upload');
     }
 
-    const cid = response.result[0].path; // IPFS CID
+    const fullUrl = response.result[0].path; // Full URL from response
+    const cid = extractIPFSHash(fullUrl); // Extract CID from URL
 
     // Store the IPFS hash, filename, and text in MongoDB
     const ipfsData = new IPFSData({ cid, text, filename });
